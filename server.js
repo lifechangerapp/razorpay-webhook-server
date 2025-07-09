@@ -3,14 +3,28 @@ require('dotenv').config(); // ENV फाइल लोड करने के �
 const express = require('express');
 const bodyParser = require('body-parser');
 const crypto = require('crypto');
+const admin = require('firebase-admin'); // Firebase Admin SDK
 
 const app = express();
 app.use(bodyParser.raw({ type: 'application/json' })); // Raw body for signature verification
 
-// Razorpay webhook secret (Render में Environment Variable के रूप में सेट करें)
+// Razorpay webhook secret (Render में Environment Variable के रूप से सेट करें)
 const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
-app.post('/webhook', (req, res) => {
+// Firebase इनीशियलाइज़ेशन (Environment Variables से कॉन्फ़िग लोड करें)
+const firebaseConfig = {
+  credential: admin.credential.cert({
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'), // नई लाइन को ठीक करें
+  }),
+  databaseURL: process.env.FIREBASE_DATABASE_URL,
+};
+
+admin.initializeApp(firebaseConfig);
+const db = admin.firestore();
+
+app.post('/webhook', async (req, res) => {
   // हेडर और बॉडी की जांच
   const signature = req.headers['x-razorpay-signature'];
   if (!signature) {
@@ -31,9 +45,38 @@ app.post('/webhook', (req, res) => {
     .digest('hex');
 
   if (signature === expectedSignature) {
-    console.log('Webhook प्राप्त हुआ:', JSON.stringify(body)); // डेटा को फॉर्मेटेड लॉग
-    // यहाँ Firebase अपडेट जोड़ें (उदाहरण के लिए)
-    res.status(200).send('Webhook processed successfully'); // सफलता का मैसेज
+    console.log('Webhook प्राप्त हुआ:', JSON.stringify(body));
+    try {
+      // पेमेंट डेटा निकालें
+      if (body.event === 'payment.captured') {
+        const payment = body.payload.payment.entity;
+        const userId = payment.notes.user_id; // पेमेंट के दौरान user_id notes में पास करना होगा
+        const amount = payment.amount / 100; // पैसा से रुपये में कन्वर्ट
+
+        if (userId) {
+          const userRef = db.collection('users').doc(userId);
+          const userDoc = await userRef.get();
+          if (userDoc.exists) {
+            const currentBalance = parseInt(userDoc.data().balance?.replace('₹', '') || 0);
+            const currentTopUp = parseInt(userDoc.data().totalTopUp || 0);
+            await userRef.update({
+              balance: `₹${currentBalance + amount}`,
+              totalTopUp: currentTopUp + amount,
+              lastPaymentId: payment.id,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            console.log(`बैलेंस अपडेट हो गया, यूजर: ${userId}, राशि: ₹${amount}`);
+          } else {
+            console.log(`यूजर ${userId} का दस्तावेज नहीं मिला`);
+          }
+        } else {
+          console.log('user_id notes में नहीं मिला');
+        }
+      }
+    } catch (error) {
+      console.error('Firebase अपडेट में त्रुटि:', error);
+    }
+    res.status(200).send('Webhook processed successfully');
   } else {
     console.log('अमान्य सिग्नेचर, प्राप्त:', signature, ' अपेक्षित:', expectedSignature);
     res.status(400).send('Invalid signature');
