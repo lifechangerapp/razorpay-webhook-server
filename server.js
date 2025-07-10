@@ -30,6 +30,18 @@ app.post('/create-order', bodyParser.json(), async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid amount' });
     }
 
+    // Debug Razorpay configuration
+    console.log('Razorpay Key ID:', process.env.RAZORPAY_KEY_ID);
+    console.log('Razorpay Key Secret:', process.env.RAZORPAY_KEY_SECRET ? 'Set' : 'Not Set');
+    if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+      throw new Error('Razorpay credentials are missing in .env');
+    }
+
+    const razorpay = new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET,
+    });
+
     const options = {
       amount: parsedAmount,
       currency: 'INR',
