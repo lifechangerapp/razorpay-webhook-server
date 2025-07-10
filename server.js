@@ -79,7 +79,7 @@ app.post('/create-order', async (req, res) => {
 });
 
 // Webhook Endpoint
-app.post('/webhook', (req, res) => {
+app.post('/webhook', async (req, res) => {
   const signature = req.headers['x-razorpay-signature'];
   if (!signature) {
     console.log('No signature found');
