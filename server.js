@@ -15,6 +15,17 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'x-razorpay-signature'],
 }));
 
+// Firebase इनीशियलाइज़ेशन (move to global scope)
+const firebaseConfig = {
+  credential: admin.credential.cert({
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+  }),
+  databaseURL: process.env.FIREBASE_DATABASE_URL,
+};
+const db = admin.initializeApp(firebaseConfig).firestore();
+
 // Specific body parser for each route
 app.post('/create-order', bodyParser.json(), async (req, res) => {
   console.log('Received create-order request:', req.body);
@@ -30,7 +41,6 @@ app.post('/create-order', bodyParser.json(), async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid amount' });
     }
 
-    // Debug Razorpay configuration
     console.log('Razorpay Key ID:', process.env.RAZORPAY_KEY_ID);
     console.log('Razorpay Key Secret:', process.env.RAZORPAY_KEY_SECRET ? 'Set' : 'Not Set');
     if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
@@ -78,7 +88,6 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
     return res.status(400).send('No data received');
   }
 
-  // Debug webhook secret
   console.log('Webhook Secret:', process.env.RAZORPAY_WEBHOOK_SECRET ? 'Set' : 'Not Set');
   if (!process.env.RAZORPAY_WEBHOOK_SECRET) {
     console.error('Webhook secret is missing in .env');
