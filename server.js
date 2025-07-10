@@ -1,12 +1,20 @@
 require('dotenv').config(); // ENV फाइल लोड करने के लिए
-
 const express = require('express');
 const bodyParser = require('body-parser');
+const cors = require('cors'); // CORS पैकेज को जोड़ें
 const crypto = require('crypto');
 const admin = require('firebase-admin'); // Firebase Admin SDK
 const Razorpay = require('razorpay'); // Razorpay SDK
 
 const app = express();
+
+// CORS कॉन्फ़िगरेशन जोड़ें
+app.use(cors({
+  origin: 'http://localhost:3000', // अपने फ्रंटएंड का URL, डेवलपमेंट के लिए
+  methods: ['GET', 'POST', 'OPTIONS'], // अनुमति देने के लिए HTTP विधियाँ
+  allowedHeaders: ['Content-Type', 'x-razorpay-signature'], // अनुमति देने के लिए हेडर
+}));
+
 app.use(bodyParser.raw({ type: 'application/json' })); // Raw body for signature verification
 
 // Razorpay Configuration
