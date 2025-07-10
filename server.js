@@ -10,7 +10,7 @@ const app = express();
 
 // CORS कॉन्फ़िगरेशन जोड़ें
 app.use(cors({
-  origin: 'http://localhost:3000', // डेवलपमेंट के लिए, प्रोडक्शन में बदलें
+origin: 'https://earnbyquiz.online', // प्रोडक्शन के लिए आधिकारिक वेबसाइट
   methods: ['POST', 'OPTIONS'], // केवल POST और OPTIONS
   allowedHeaders: ['Content-Type', 'x-razorpay-signature'],
 }));
