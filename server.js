@@ -15,9 +15,9 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'x-razorpay-signature'],
 }));
 
-// Body parser configuration for JSON
-app.use(bodyParser.json()); // Parse JSON bodies
-app.use(bodyParser.raw({ type: 'application/json' })); // For webhook raw body
+// Body parser configuration
+app.use(bodyParser.json()); // Parse JSON bodies for other endpoints
+app.use(bodyParser.raw({ type: 'application/json' })); // For webhook raw body, no parsing
 
 // Razorpay Configuration
 const razorpay = new Razorpay({
@@ -79,15 +79,15 @@ app.post('/create-order', async (req, res) => {
 });
 
 // Webhook Endpoint
-app.post('/webhook', async (req, res) => {
+app.post('/webhook', (req, res) => {
   const signature = req.headers['x-razorpay-signature'];
   if (!signature) {
     console.log('No signature found');
     return res.status(400).send('Missing signature');
   }
 
-  const body = req.body.toString('utf8');
-  if (!body || body.length === 0) {
+  const body = req.body; // Use raw body as received
+  if (!body || Buffer.byteLength(body) === 0) {
     console.log('No body data received');
     return res.status(400).send('No data received');
   }
@@ -96,17 +96,19 @@ app.post('/webhook', async (req, res) => {
   try {
     expectedSignature = crypto
       .createHmac('sha256', webhookSecret)
-      .update(body)
+      .update(body) // Use raw buffer directly
       .digest('hex');
   } catch (cryptoError) {
     console.error('Signature generation failed:', cryptoError);
     return res.status(500).send('Internal server error');
   }
 
+  console.log('Received signature:', signature, 'Expected signature:', expectedSignature);
+
   if (signature === expectedSignature) {
-    console.log('Webhook received:', body);
+    console.log('Webhook received, body:', body.toString('utf8'));
     try {
-      const payload = JSON.parse(body);
+      const payload = JSON.parse(body.toString('utf8'));
       if (payload.event === 'payment.captured') {
         const payment = payload.payload.payment.entity;
         const userId = payment.notes?.user_id;
@@ -128,7 +130,6 @@ app.post('/webhook', async (req, res) => {
             console.log(`Balance updated for User: ${userId}, Amount: ₹${amount}`);
           } else {
             console.log(`User ${userId} document not found`);
-            // Create a new user document if not exists (optional)
             await userRef.set({
               balance: `₹${amount}`,
               totalTopUp: amount,
