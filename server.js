@@ -4,9 +4,16 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const crypto = require('crypto');
 const admin = require('firebase-admin'); // Firebase Admin SDK
+const Razorpay = require('razorpay'); // Razorpay SDK
 
 const app = express();
 app.use(bodyParser.raw({ type: 'application/json' })); // Raw body for signature verification
+
+// Razorpay Configuration
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET,
+});
 
 // Razorpay webhook secret (Render में Environment Variable के रूप से सेट करें)
 const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
@@ -24,6 +31,29 @@ const firebaseConfig = {
 admin.initializeApp(firebaseConfig);
 const db = admin.firestore();
 
+// Create Order API
+app.post('/create-order', async (req, res) => {
+  try {
+    const { amount, receipt, userId } = req.body; // amount in paise, userId for notes
+    const options = {
+      amount: amount, // e.g., 100 (1 INR in paise)
+      currency: 'INR',
+      receipt: receipt || `receipt_${Date.now()}`,
+      payment_capture: 1, // Auto-capture enabled
+      notes: {
+        user_id: userId, // Pass userId to link payment with user
+      },
+    };
+
+    const order = await razorpay.orders.create(options);
+    res.json({ orderId: order.id, success: true });
+  } catch (error) {
+    console.error('Order creation failed:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Webhook Endpoint
 app.post('/webhook', async (req, res) => {
   // हेडर और बॉडी की जांच
   const signature = req.headers['x-razorpay-signature'];
