@@ -15,35 +15,8 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'x-razorpay-signature'],
 }));
 
-// Body parser configuration
-// Apply raw body parser for webhook first
-app.use(bodyParser.raw({ type: 'application/json' })); // For webhook raw body
-app.use(bodyParser.json()); // Parse JSON bodies for other endpoints, but after raw
-
-// Razorpay Configuration
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
-
-// Razorpay webhook secret
-const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
-
-// Firebase इनीशियलाइज़ेशन
-const firebaseConfig = {
-  credential: admin.credential.cert({
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-  }),
-  databaseURL: process.env.FIREBASE_DATABASE_URL,
-};
-
-admin.initializeApp(firebaseConfig);
-const db = admin.firestore();
-
-// Create Order API
-app.post('/create-order', async (req, res) => {
+// Specific body parser for each route
+app.post('/create-order', bodyParser.json(), async (req, res) => {
   console.log('Received create-order request:', req.body);
   try {
     const { amount, receipt, userId } = req.body;
@@ -79,8 +52,8 @@ app.post('/create-order', async (req, res) => {
   }
 });
 
-// Webhook Endpoint
-app.post('/webhook', async (req, res) => {
+// Webhook Endpoint with raw body parser
+app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
   const signature = req.headers['x-razorpay-signature'];
   if (!signature) {
     console.log('No signature found');
