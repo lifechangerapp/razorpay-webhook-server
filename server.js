@@ -16,8 +16,9 @@ app.use(cors({
 }));
 
 // Body parser configuration
-app.use(bodyParser.json()); // Parse JSON bodies for other endpoints
-app.use(bodyParser.raw({ type: 'application/json' })); // For webhook raw body, no parsing
+// Apply raw body parser for webhook first
+app.use(bodyParser.raw({ type: 'application/json' })); // For webhook raw body
+app.use(bodyParser.json()); // Parse JSON bodies for other endpoints, but after raw
 
 // Razorpay Configuration
 const razorpay = new Razorpay({
