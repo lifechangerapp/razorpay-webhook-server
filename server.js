@@ -11,7 +11,7 @@ const app = express();
 // CORS कॉन्फ़िगरेशन जोड़ें
 app.use(cors({
   origin: 'http://localhost:3000', // डेवलपमेंट के लिए, प्रोडक्शन में बदलें
-  methods: ['POST', 'OPTIONS'], // केवल POST और OPTIONS, GET हटाया गया
+  methods: ['POST', 'OPTIONS'], // केवल POST और OPTIONS
   allowedHeaders: ['Content-Type', 'x-razorpay-signature'],
 }));
 
@@ -43,7 +43,7 @@ const db = admin.firestore();
 
 // Create Order API
 app.post('/create-order', async (req, res) => {
-  console.log('Received create-order request:', req.body); // Log incoming request
+  console.log('Received create-order request:', req.body);
   try {
     const { amount, receipt, userId } = req.body;
     if (!amount || !userId) {
@@ -51,17 +51,16 @@ app.post('/create-order', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Amount and userId are required' });
     }
 
-    // Validate amount
     const parsedAmount = parseInt(amount);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
       return res.status(400).json({ success: false, error: 'Invalid amount' });
     }
 
     const options = {
-      amount: parsedAmount, // Amount in paise
+      amount: parsedAmount,
       currency: 'INR',
       receipt: receipt || `receipt_${Date.now()}`,
-      payment_capture: 1, // Auto-capture
+      payment_capture: 1,
       notes: { user_id: userId },
     };
 
@@ -74,7 +73,7 @@ app.post('/create-order', async (req, res) => {
       success: true,
     });
   } catch (error) {
-    console.error('Order creation failed:', error.message, error.stack); // Detailed error logging
+    console.error('Order creation failed:', error.message, error.stack);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -126,9 +125,17 @@ app.post('/webhook', async (req, res) => {
               lastPaymentId: payment.id,
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
-            console.log(`Balance updated, User: ${userId}, Amount: ₹${amount}`);
+            console.log(`Balance updated for User: ${userId}, Amount: ₹${amount}`);
           } else {
             console.log(`User ${userId} document not found`);
+            // Create a new user document if not exists (optional)
+            await userRef.set({
+              balance: `₹${amount}`,
+              totalTopUp: amount,
+              lastPaymentId: payment.id,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            console.log(`New user document created for ${userId} with initial balance ₹${amount}`);
           }
         } else {
           console.log('user_id not found in notes');
