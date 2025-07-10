@@ -10,12 +10,14 @@ const app = express();
 
 // CORS कॉन्फ़िगरेशन जोड़ें
 app.use(cors({
-  origin: 'http://localhost:3000', // अपने फ्रंटएंड का URL, डेवलपमेंट के लिए
-  methods: ['GET', 'POST', 'OPTIONS'], // अनुमति देने के लिए HTTP विधियाँ
-  allowedHeaders: ['Content-Type', 'x-razorpay-signature'], // अनुमति देने के लिए हेडर
+  origin: 'http://localhost:3000', // डेवलपमेंट के लिए, प्रोडक्शन में बदलें
+  methods: ['POST', 'OPTIONS'], // केवल POST और OPTIONS, GET हटाया गया
+  allowedHeaders: ['Content-Type', 'x-razorpay-signature'],
 }));
 
-app.use(bodyParser.raw({ type: 'application/json' })); // Raw body for signature verification
+// Body parser configuration for JSON
+app.use(bodyParser.json()); // Parse JSON bodies
+app.use(bodyParser.raw({ type: 'application/json' })); // For webhook raw body
 
 // Razorpay Configuration
 const razorpay = new Razorpay({
@@ -23,15 +25,15 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
-// Razorpay webhook secret (Render में Environment Variable के रूप से सेट करें)
+// Razorpay webhook secret
 const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
-// Firebase इनीशियलाइज़ेशन (Environment Variables से कॉन्फ़िग लोड करें)
+// Firebase इनीशियलाइज़ेशन
 const firebaseConfig = {
   credential: admin.credential.cert({
     projectId: process.env.FIREBASE_PROJECT_ID,
     clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'), // नई लाइन को ठीक करें
+    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
   }),
   databaseURL: process.env.FIREBASE_DATABASE_URL,
 };
@@ -41,50 +43,56 @@ const db = admin.firestore();
 
 // Create Order API
 app.post('/create-order', async (req, res) => {
+  console.log('Received create-order request:', req.body); // Log incoming request
   try {
-    const { amount, receipt, userId } = req.body; // amount in paise, userId for notes
+    const { amount, receipt, userId } = req.body;
     if (!amount || !userId) {
+      console.log('Missing required fields:', { amount, userId });
       return res.status(400).json({ success: false, error: 'Amount and userId are required' });
     }
 
+    // Validate amount
+    const parsedAmount = parseInt(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      return res.status(400).json({ success: false, error: 'Invalid amount' });
+    }
+
     const options = {
-      amount: parseInt(amount), // Ensure amount is an integer
+      amount: parsedAmount, // Amount in paise
       currency: 'INR',
       receipt: receipt || `receipt_${Date.now()}`,
-      payment_capture: 1, // Auto-capture enabled
-      notes: {
-        user_id: userId, // Pass userId to link payment with user
-      },
+      payment_capture: 1, // Auto-capture
+      notes: { user_id: userId },
     };
 
+    console.log('Creating order with options:', options);
     const order = await razorpay.orders.create(options);
+    console.log('Order created successfully:', order);
     res.json({
       orderId: order.id,
-      key: process.env.RAZORPAY_KEY_ID, // Return Razorpay key to client
+      key: process.env.RAZORPAY_KEY_ID,
       success: true,
     });
   } catch (error) {
-    console.error('Order creation failed:', error);
+    console.error('Order creation failed:', error.message, error.stack); // Detailed error logging
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
 // Webhook Endpoint
 app.post('/webhook', async (req, res) => {
-  // हेडर और बॉडी की जांच
   const signature = req.headers['x-razorpay-signature'];
   if (!signature) {
-    console.log('कोई सिग्नेचर नहीं मिला');
+    console.log('No signature found');
     return res.status(400).send('Missing signature');
   }
 
-  const body = req.body.toString('utf8'); // Convert buffer to string
+  const body = req.body.toString('utf8');
   if (!body || body.length === 0) {
-    console.log('कोई बॉडी डेटा नहीं मिला');
+    console.log('No body data received');
     return res.status(400).send('No data received');
   }
 
-  // सिग्नेचर वेरीफिकेशन
   let expectedSignature;
   try {
     expectedSignature = crypto
@@ -97,14 +105,13 @@ app.post('/webhook', async (req, res) => {
   }
 
   if (signature === expectedSignature) {
-    console.log('Webhook प्राप्त हुआ:', body);
+    console.log('Webhook received:', body);
     try {
       const payload = JSON.parse(body);
-      // पेमेंट डेटा निकालें
       if (payload.event === 'payment.captured') {
         const payment = payload.payload.payment.entity;
-        const userId = payment.notes?.user_id; // Safely access notes
-        const amount = payment.amount / 100; // पैसा से रुपये में कन्वर्ट
+        const userId = payment.notes?.user_id;
+        const amount = payment.amount / 100;
 
         if (userId) {
           const userRef = db.collection('users').doc(userId);
@@ -119,27 +126,32 @@ app.post('/webhook', async (req, res) => {
               lastPaymentId: payment.id,
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
-            console.log(`बैलेंस अपडेट हो गया, यूजर: ${userId}, राशि: ₹${amount}`);
+            console.log(`Balance updated, User: ${userId}, Amount: ₹${amount}`);
           } else {
-            console.log(`यूजर ${userId} का दस्तावेज नहीं मिला`);
+            console.log(`User ${userId} document not found`);
           }
         } else {
-          console.log('user_id notes में नहीं मिला');
+          console.log('user_id not found in notes');
         }
       } else {
-        console.log(`अनसपोर्टेड इवेंट: ${payload.event}`);
+        console.log(`Unsupported event: ${payload.event}`);
       }
     } catch (parseError) {
-      console.error('JSON पर्सिंग में त्रुटि:', parseError);
+      console.error('JSON parsing error:', parseError);
       return res.status(400).send('Invalid payload format');
     }
     res.status(200).send('Webhook processed successfully');
   } else {
-    console.log('अमान्य सिग्नेचर, प्राप्त:', signature, ' अपेक्षित:', expectedSignature);
+    console.log('Invalid signature, received:', signature, 'expected:', expectedSignature);
     res.status(400).send('Invalid signature');
   }
 });
 
-// सर्वर शुरू करें
+// Handle invalid routes
+app.use((req, res) => {
+  res.status(404).send('Cannot ' + req.method + ' ' + req.url);
+});
+
+// Server start
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Server Running on Port ${PORT}`));
