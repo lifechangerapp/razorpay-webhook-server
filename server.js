@@ -78,10 +78,17 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
     return res.status(400).send('No data received');
   }
 
+  // Debug webhook secret
+  console.log('Webhook Secret:', process.env.RAZORPAY_WEBHOOK_SECRET ? 'Set' : 'Not Set');
+  if (!process.env.RAZORPAY_WEBHOOK_SECRET) {
+    console.error('Webhook secret is missing in .env');
+    return res.status(500).send('Internal server error: Webhook secret not configured');
+  }
+
   let expectedSignature;
   try {
     expectedSignature = crypto
-      .createHmac('sha256', webhookSecret)
+      .createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET)
       .update(body) // Use raw buffer directly
       .digest('hex');
   } catch (cryptoError) {
@@ -147,5 +154,5 @@ app.use((req, res) => {
 });
 
 // Server start
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 10000; // Use Render's default port or 10000 as detected
 app.listen(PORT, () => console.log(`Server Running on Port ${PORT}`));
