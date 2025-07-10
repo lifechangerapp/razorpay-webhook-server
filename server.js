@@ -35,8 +35,12 @@ const db = admin.firestore();
 app.post('/create-order', async (req, res) => {
   try {
     const { amount, receipt, userId } = req.body; // amount in paise, userId for notes
+    if (!amount || !userId) {
+      return res.status(400).json({ success: false, error: 'Amount and userId are required' });
+    }
+
     const options = {
-      amount: amount, // e.g., 100 (1 INR in paise)
+      amount: parseInt(amount), // Ensure amount is an integer
       currency: 'INR',
       receipt: receipt || `receipt_${Date.now()}`,
       payment_capture: 1, // Auto-capture enabled
@@ -46,7 +50,11 @@ app.post('/create-order', async (req, res) => {
     };
 
     const order = await razorpay.orders.create(options);
-    res.json({ orderId: order.id, success: true });
+    res.json({
+      orderId: order.id,
+      key: process.env.RAZORPAY_KEY_ID, // Return Razorpay key to client
+      success: true,
+    });
   } catch (error) {
     console.error('Order creation failed:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -62,33 +70,41 @@ app.post('/webhook', async (req, res) => {
     return res.status(400).send('Missing signature');
   }
 
-  const body = req.body;
-  if (!body || Object.keys(body).length === 0) {
+  const body = req.body.toString('utf8'); // Convert buffer to string
+  if (!body || body.length === 0) {
     console.log('कोई बॉडी डेटा नहीं मिला');
     return res.status(400).send('No data received');
   }
 
   // सिग्नेचर वेरीफिकेशन
-  const expectedSignature = crypto
-    .createHmac('sha256', webhookSecret)
-    .update(Buffer.from(JSON.stringify(body)))
-    .digest('hex');
+  let expectedSignature;
+  try {
+    expectedSignature = crypto
+      .createHmac('sha256', webhookSecret)
+      .update(body)
+      .digest('hex');
+  } catch (cryptoError) {
+    console.error('Signature generation failed:', cryptoError);
+    return res.status(500).send('Internal server error');
+  }
 
   if (signature === expectedSignature) {
-    console.log('Webhook प्राप्त हुआ:', JSON.stringify(body));
+    console.log('Webhook प्राप्त हुआ:', body);
     try {
+      const payload = JSON.parse(body);
       // पेमेंट डेटा निकालें
-      if (body.event === 'payment.captured') {
-        const payment = body.payload.payment.entity;
-        const userId = payment.notes.user_id; // पेमेंट के दौरान user_id notes में पास करना होगा
+      if (payload.event === 'payment.captured') {
+        const payment = payload.payload.payment.entity;
+        const userId = payment.notes?.user_id; // Safely access notes
         const amount = payment.amount / 100; // पैसा से रुपये में कन्वर्ट
 
         if (userId) {
           const userRef = db.collection('users').doc(userId);
           const userDoc = await userRef.get();
           if (userDoc.exists) {
-            const currentBalance = parseInt(userDoc.data().balance?.replace('₹', '') || 0);
-            const currentTopUp = parseInt(userDoc.data().totalTopUp || 0);
+            const userData = userDoc.data();
+            const currentBalance = parseInt(userData.balance?.replace('₹', '') || 0);
+            const currentTopUp = parseInt(userData.totalTopUp || 0);
             await userRef.update({
               balance: `₹${currentBalance + amount}`,
               totalTopUp: currentTopUp + amount,
@@ -102,9 +118,12 @@ app.post('/webhook', async (req, res) => {
         } else {
           console.log('user_id notes में नहीं मिला');
         }
+      } else {
+        console.log(`अनसपोर्टेड इवेंट: ${payload.event}`);
       }
-    } catch (error) {
-      console.error('Firebase अपडेट में त्रुटि:', error);
+    } catch (parseError) {
+      console.error('JSON पर्सिंग में त्रुटि:', parseError);
+      return res.status(400).send('Invalid payload format');
     }
     res.status(200).send('Webhook processed successfully');
   } else {
