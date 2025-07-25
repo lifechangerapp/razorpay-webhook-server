@@ -8,14 +8,17 @@ const Razorpay = require('razorpay'); // Razorpay SDK
 
 const app = express();
 
-// CORS कॉन्फ़िगरेशन जोड़ें
+// CORS कॉन्फ़िगरेशन जोड़ें (टेस्टिंग और प्रोडक्शन के लिए)
+// CORS कॉन्फिगरेशन अपडेट करें
+// CORS कॉन्फिगरेशन अपडेट करें
 app.use(cors({
-origin: 'https://earnbyquiz.online', // प्रोडक्शन के लिए आधिकारिक वेबसाइट
-  methods: ['POST', 'OPTIONS'], // केवल POST और OPTIONS
+  origin: ['https://earnbyquiz.online', 'http://localhost:3000'], // टेस्टिंग और प्रोडक्शन दोनों के लिए
+  methods: ['POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'x-razorpay-signature'],
 }));
 
-// Firebase इनीशियलाइज़ेशन (move to global scope)
+
+// Firebase इनीशियलाइज़ेशन (global scope)
 const firebaseConfig = {
   credential: admin.credential.cert({
     projectId: process.env.FIREBASE_PROJECT_ID,
@@ -78,11 +81,11 @@ app.post('/create-order', bodyParser.json(), async (req, res) => {
 app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
   const signature = req.headers['x-razorpay-signature'];
   if (!signature) {
-    console.log('No signature found');
+    console.log('No signature found in headers');
     return res.status(400).send('Missing signature');
   }
 
-  const body = req.body; // Use raw body as received
+  const body = req.body;
   if (!body || Buffer.byteLength(body) === 0) {
     console.log('No body data received');
     return res.status(400).send('No data received');
@@ -98,7 +101,7 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
   try {
     expectedSignature = crypto
       .createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET)
-      .update(body) // Use raw buffer directly
+      .update(body)
       .digest('hex');
   } catch (cryptoError) {
     console.error('Signature generation failed:', cryptoError);
@@ -131,7 +134,6 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
             });
             console.log(`Balance updated for User: ${userId}, Amount: ₹${amount}`);
           } else {
-            console.log(`User ${userId} document not found`);
             await userRef.set({
               balance: `₹${amount}`,
               totalTopUp: amount,
@@ -143,6 +145,12 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
         } else {
           console.log('user_id not found in notes');
         }
+      } else if (payload.event === 'payment.authorized') {
+        console.log('Payment authorized, awaiting capture:', payload.payload.payment.entity.id);
+        // अतिरिक्त लॉजिक अगर जरूरी हो
+      } else if (payload.event === 'payment.failed') {
+        console.log('Payment failed:', payload.payload.payment.entity.id);
+        // फेल होने पर नोटिफिकेशन या यूजर को सूचना भेजने का लॉजिक
       } else {
         console.log(`Unsupported event: ${payload.event}`);
       }
@@ -163,5 +171,5 @@ app.use((req, res) => {
 });
 
 // Server start
-const PORT = process.env.PORT || 10000; // Use Render's default port or 10000 as detected
-app.listen(PORT, () => console.log(`Server Running on Port ${PORT}`));
+const PORT = process.env.PORT || 10000; // Render's default port or 10000
+app.listen(PORT, () => console.log(`Server Running on Port ${PORT} at ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`));
