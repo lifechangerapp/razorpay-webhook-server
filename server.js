@@ -1,24 +1,19 @@
-require('dotenv').config(); // ENV फाइल लोड करने के लिए
+require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
-const cors = require('cors'); // CORS पैकेज को जोड़ें
+const cors = require('cors');
 const crypto = require('crypto');
-const admin = require('firebase-admin'); // Firebase Admin SDK
-const Razorpay = require('razorpay'); // Razorpay SDK
+const admin = require('firebase-admin');
+const Razorpay = require('razorpay');
 
 const app = express();
 
-// CORS कॉन्फ़िगरेशन जोड़ें (टेस्टिंग और प्रोडक्शन के लिए)
-// CORS कॉन्फिगरेशन अपडेट करें
-// CORS कॉन्फिगरेशन अपडेट करें
 app.use(cors({
-  origin: ['https://earnbyquiz.online', 'http://localhost:3000'], // टेस्टिंग और प्रोडक्शन दोनों के लिए
+  origin: ['https://earnbyquiz.online', 'http://localhost:3000'],
   methods: ['POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'x-razorpay-signature'],
 }));
 
-
-// Firebase इनीशियलाइज़ेशन (global scope)
 const firebaseConfig = {
   credential: admin.credential.cert({
     projectId: process.env.FIREBASE_PROJECT_ID,
@@ -29,7 +24,6 @@ const firebaseConfig = {
 };
 const db = admin.initializeApp(firebaseConfig).firestore();
 
-// Specific body parser for each route
 app.post('/create-order', bodyParser.json(), async (req, res) => {
   console.log('Received create-order request:', req.body);
   try {
@@ -44,8 +38,6 @@ app.post('/create-order', bodyParser.json(), async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid amount' });
     }
 
-    console.log('Razorpay Key ID:', process.env.RAZORPAY_KEY_ID);
-    console.log('Razorpay Key Secret:', process.env.RAZORPAY_KEY_SECRET ? 'Set' : 'Not Set');
     if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
       throw new Error('Razorpay credentials are missing in .env');
     }
@@ -77,7 +69,6 @@ app.post('/create-order', bodyParser.json(), async (req, res) => {
   }
 });
 
-// Webhook Endpoint with raw body parser
 app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
   const signature = req.headers['x-razorpay-signature'];
   if (!signature) {
@@ -91,7 +82,6 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
     return res.status(400).send('No data received');
   }
 
-  console.log('Webhook Secret:', process.env.RAZORPAY_WEBHOOK_SECRET ? 'Set' : 'Not Set');
   if (!process.env.RAZORPAY_WEBHOOK_SECRET) {
     console.error('Webhook secret is missing in .env');
     return res.status(500).send('Internal server error: Webhook secret not configured');
@@ -147,10 +137,8 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
         }
       } else if (payload.event === 'payment.authorized') {
         console.log('Payment authorized, awaiting capture:', payload.payload.payment.entity.id);
-        // अतिरिक्त लॉजिक अगर जरूरी हो
       } else if (payload.event === 'payment.failed') {
         console.log('Payment failed:', payload.payload.payment.entity.id);
-        // फेल होने पर नोटिफिकेशन या यूजर को सूचना भेजने का लॉजिक
       } else {
         console.log(`Unsupported event: ${payload.event}`);
       }
@@ -165,11 +153,41 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
   }
 });
 
-// Handle invalid routes
+app.post('/verify-payment', bodyParser.json(), async (req, res) => {
+  const { paymentId, orderId, userId } = req.body;
+  try {
+    const razorpay = new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET,
+    });
+
+    const payment = await razorpay.payments.fetch(paymentId);
+    if (payment.order_id === orderId && payment.status === 'captured') {
+      const userRef = db.collection('users').doc(userId);
+      const userDoc = await userRef.get();
+      const currentBalance = parseInt(userDoc.data()?.balance?.replace('₹', '') || 0);
+      const currentTopUp = parseInt(userDoc.data()?.totalTopUp || 0);
+      const amount = payment.amount / 100;
+
+      await userRef.update({
+        balance: `₹${currentBalance + amount}`,
+        totalTopUp: currentTopUp + amount,
+        lastPaymentId: paymentId,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      res.json({ success: true, message: 'Payment verified and balance updated' });
+    } else {
+      res.json({ success: false, message: 'Payment verification failed' });
+    }
+  } catch (error) {
+    console.error('Payment verification error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.use((req, res) => {
   res.status(404).send('Cannot ' + req.method + ' ' + req.url);
 });
 
-// Server start
-const PORT = process.env.PORT || 10000; // Render's default port or 10000
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`Server Running on Port ${PORT} at ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`));
